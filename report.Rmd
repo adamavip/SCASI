@@ -1,0 +1,202 @@
+---
+title: '`r params$crop`'
+output:
+  word_document: 
+    fig_height: 7
+    fig_width: 14
+    toc: yes
+  html_notebook: default
+  pdf_document: default
+params:
+  crop: nothing
+---
+
+
+
+## Load the working packages
+```{r message=FALSE, warning=FALSE}
+library(AgroR)
+library(tidyverse)
+library(agricolae)
+library(lme4)
+library(emmeans)
+library(reshape)
+library(reshape2)
+library(car)
+
+```
+
+
+
+## Load the data
+
+```{r cars, warning=FALSE}
+ setwd("~/Code/R/SCASI")
+library(tidyverse)
+library(skimr)
+
+df <- readxl::read_excel("./input/SCASI_Field_Trials_Data_2022ALL_20230409_Adama_v2.xlsx",sheet = "MergePart2Part1")
+# First rows
+#knitr::kable(head(df))
+
+# Convert to factor
+df$Rep <- as.factor(df$Rep)
+df$Treatment <- as.factor(df$Treatment)
+df$Woreda <- as.factor(df$Woreda)
+```
+
+## Overview of the data
+Number of observations and variables:
+```{r echo=FALSE}
+dim(df)
+```
+
+## Extract data per crops
+```{r warning=FALSE}
+# crop_data
+crop_data <- df %>% filter(Plot_crop==params$crop)
+```
+
+## Descriptive statistics
+### Yield accorss treatments
+```{r warning=FALSE}
+yield_trt_summary<- crop_data %>% group_by(Treatment) %>% summarize(across(.cols = c(GY_kg_ha,SY_kg_ha),list(min=min,max=max,mean=mean,sd=sd),na.rm=T,.names = "{.fn}_{.col}"))
+knitr::kable(yield_trt_summary)
+#yield_trt_summary
+#with(crop_data, desc(Treatment, GrainYield, ylab = "Grain Yield ", xlab = "Treatment", ylim = NA))
+
+#boxplot
+crop_data %>% select(GY_kg_ha, SY_kg_ha, Treatment) %>% gather(key = "Yields",value= "Value", -Treatment) %>% 
+ggplot(aes(x=Treatment,y=Value, fill=Yields)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("GY_kg_ha" = "#dfc27d", "SY_kg_ha" = "#80cdc1"), labels=c("Grain", "Stover")) +
+  labs(y="Yield (Kg/ha)")+
+  theme_bw()+
+  theme(legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 24),
+        axis.text = element_text(size = 20))
+```
+
+### Yield accorss locations
+```{r warning=FALSE}
+yield_location<- crop_data %>% group_by(Woreda) %>% summarize(across(.cols = c(GY_kg_ha,SY_kg_ha),list(min=min,max=max,mean=mean,sd=sd),na.rm=T,.names = "{.fn}_{.col}"))
+knitr::kable(yield_location)
+#yield_trt_summary
+#with(crop_data, desc(Treatment, GrainYield, ylab = "Grain Yield ", xlab = "Treatment", ylim = NA))
+
+#boxplot
+crop_data %>% select(GY_kg_ha, SY_kg_ha, Woreda) %>% gather(key = "Yields",value= "Value", -Woreda) %>% 
+ggplot(aes(x=Woreda,y=Value, fill=Yields)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("GY_kg_ha" = "#d01c8b", "SY_kg_ha" = "#4dac26"), labels=c("Grain", "Stover")) +
+  labs(y="Yield (Kg/ha)")+
+  theme_bw()+
+  theme(legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 24),
+        axis.text = element_text(size = 20))
+```
+
+
+### Yield accorss locations and treatments
+* Summary table 
+```{r warning=FALSE}
+yield_location_trt<- crop_data %>% select(GY_kg_ha, SY_kg_ha, Woreda,Treatment) %>% group_by(Woreda,Treatment) %>% summarize(across(.cols = c(GY_kg_ha, SY_kg_ha),list(min=min,max=max,mean=mean,sd=sd),na.rm=T,.names = "{.fn}_{.col}"))
+knitr::kable(yield_location_trt)
+#yield_trt_summary
+#with(crop_data, desc(Treatment, GrainYield, ylab = "Grain Yield ", xlab = "Treatment", ylim = NA))
+
+```
+
+
+* Grain 
+```{r message=FALSE, warning=FALSE}
+#boxplot
+crop_data %>% select(GY_kg_ha, Woreda,Treatment) %>% 
+ggplot(aes(x=Treatment,y=GY_kg_ha, fill=Woreda)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set1") +
+  labs(y="Grain Yield (kg/ha)")+
+  theme_bw()+
+  theme(legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 24),
+        axis.text = element_text(size = 20))
+```
+
+* Stover 
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#boxplot
+crop_data %>% select(SY_kg_ha, Woreda,Treatment) %>% 
+ggplot(aes(x=Treatment,y=SY_kg_ha, fill=Woreda)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(y="Grain Yield (kg/ha)")+
+  theme_bw()+
+  theme(legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16),
+        axis.title = element_text(size = 24),
+        axis.text = element_text(size = 20))
+```
+
+
+
+## Factorial analysis
+```{r warning=FALSE}
+
+# Analysis of variance
+
+#
+if (length(unique(crop_data$Woreda))<=1) {
+  model <- lm(GY_kg_ha~ Treatment, data=crop_data)
+  anova(model)
+} else {
+  model <- lm(GY_kg_ha~ Treatment + Woreda + (Treatment:Woreda) + (Woreda:Rep),data=crop_data)
+  anova(model)
+}
+```
+
+## Posthoc test
+```{r warning=F}
+
+# Compute the estimated marginal means
+emmeans_result <- emmeans(model, ~ Treatment)
+
+# Perform pairwise comparisons using Tukey's adjustment
+pairwise_result <- pairs(emmeans_result, adjust = "tukey")
+
+# Display the pairwise comparisons
+knitr::kable(pairwise_result)
+```
+```{r warning=FALSE}
+#plot(pairwise_result, pch = "*", cex = 1.5)
+as_tibble(pairwise_result) %>% 
+ggplot(aes(x=estimate,y=contrast)) +
+  geom_point(shape=23, size = 3, fill = "red") +
+  geom_errorbar(aes(xmin = estimate - SE, xmax = estimate + SE),
+                width = 0.2) +
+  labs(x = "Estimate", y = "Contrast")+
+  theme_bw()+
+  theme(axis.title = element_text(size = 16),
+        axis.text = element_text(size = 11))
+```
+
+## Best treatment per location
+### For every woreda, what are the 3 best treatment?
+* Grain
+```{r warning=FALSE}
+best_comb<-yield_location_trt %>% select(Woreda, Treatment, mean_GY_kg_ha) %>% 
+  group_by(Woreda) %>%
+  slice_max(mean_GY_kg_ha, n=3)
+knitr::kable(best_comb)
+```
+* Stover
+```{r}
+best_comb<-yield_location_trt %>% select(Woreda, Treatment, mean_SY_kg_ha) %>% 
+  group_by(Woreda) %>%
+  slice_max(mean_SY_kg_ha, n=3)
+knitr::kable(best_comb)
+```
+
+
